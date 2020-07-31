@@ -1,0 +1,139 @@
+#导入数据
+data<- read.csv(file.choose())
+data<-data[,-1]
+is.ts(data)
+#将数据类型改成时间序列
+data<-ts(data,start = 2002)
+######随机性检验
+library(timeDate)
+library(timeSeries)
+library(fBasics)
+library(tseries)
+#纯随机性 H0:白噪声
+Box.test(data,type = "Ljung-Box",lag=2)
+Box.test(data,type = "Ljung-Box",lag=4)
+Box.test(data,type = "Ljung-Box",lag=6)
+Box.test(data,type = "Ljung-Box",lag=8)
+#p值都比较小 拒绝原假设 证明不是白噪声
+
+######平稳化处理
+#原始数据时序图绘制
+plot.ts(data,ylab="house_price",xlab="year")
+acf(data)
+acf(data,plot=F)
+
+#1阶差分，绘制时序图、自相关图，ADF检验未通过
+data1<-diff(data)
+plot.ts(data1)
+acf(data1)
+acf(data1,plot=F)
+adf.test(data1)
+
+#2阶差分，绘制时序图、自相关图，ADF检验未通过
+data2<-diff(data1)
+plot.ts(data2)
+acf(data2)
+acf(data2,plot=F)
+adf.test(data2)
+#3阶差分，ADF检验通过并绘制偏自相关图
+data3<-diff(data2)
+plot.ts(data3)
+acf(data3)
+acf(data3,plot=F)
+adf.test(data3)
+pacf(data3)
+
+############建立模型
+#根据ACF和PACF建立模型
+#选用最小似然估计估计方法
+#pacf图：1阶拖尾/截尾；acf：1阶截尾。所以模型的p，d，q为0，2，1或1，2，1
+(mod1=arima(data,order=c(0,3,1),method='ML'))
+(mod2=arima(data,order=c(1,3,1),method='ML'))
+#根据AICc自动选择模型,得到模型（1，1，0）
+library(forecast)
+(mod_auto=auto.arima(data))
+
+#选择模型
+#残差白噪检验
+#p值大于0.05，则表明残差为白噪声，也就是说模型对信息的提取比较完全；
+#mod_auto符合要求
+Box.test(mod1$residuals,type='Ljung-Box')
+Box.test(mod2$residuals,type='Ljung-Box')
+Box.test(mod_auto$residuals,type='Ljung-Box')
+
+
+
+#进行预测，
+#shixian为数据，xuxian为拟合值
+#mod_auto
+(pre_auto=forecast(mod_auto,5))
+ts.plot(pre_auto$x,pre_auto$fitted,pre_auto$mean,gpars=list(xlab="year", ylab="房价", lty=c(1:3)))
+###########
+#mod-auto为最终确定的模型
+#预测结果为19516.63，23388.32，22530.22，24993.75，25124.56。
+
+
+
+
+
+##########以下为建立的其他模型，效果都不是很好
+#正态性检验未通过，试试看指数平滑模型
+#建立holt指数平滑
+##beta是趋势性的指数，它表示随着时间的变化，时间序列趋势所发生的变化。
+##而b则是初始值。
+install.packages('fpp2')
+library(fpp2)
+library(ggplot2)
+library(forecast)
+library(fma)
+library(expsmooth)
+fj <- holt(data, h=5)
+fj$model
+#建立damped holt指数平滑
+##0<ϕ<1，一般在0.8到0.98之间，如果等于1，那么就与传统的Holt平滑法无异。
+fj1 <- holt(data, damped=TRUE, phi = 0.8, h=5)
+fj1$model
+##模型检验,两个模型均通过随机性检验，但均不满足正态性假设
+checkresiduals(fj)
+checkresiduals(fj1)
+shapiro.test(fj$residuals)
+shapiro.test(fj1$residuals)
+#两种模型绘图,不大对劲
+autoplot(data) +
+  autolayer(fj, series="Holt's method", PI=FALSE) +
+  autolayer(fj1, series="Damped Holt's method", PI=FALSE) +
+  ggtitle("Forecasts from Holt's method") + xlab("Year") +
+  ylab("FangJia in Nanjing") +
+  guides(colour=guide_legend(title="Forecast"))
+
+#############
+##考虑季节性因素，建立Holt-Winter模型。fit1相加；fit相乘
+###这个模型好像没有周期，先考虑其他的吧
+
+###########
+#用holtwinter函数自动选择模型，随机性检验通过，且满足正态性假设。
+forc <- HoltWinters(data, gamma=FALSE)
+plot(forc)
+checkresiduals(forc$x-forc$fitted[,1])
+shapiro.test(forc$x-forc$fitted[,1])
+Box.test(forc$x-forc$fitted[,1],type='Ljung-Box')
+pre_holtwinter <- forecast(forc,5)
+plot(pre_holtwinter)
+ts.plot(pre_holtwinter$x,pre_holtwinter$fitted,pre_holtwinter$mean,gpars=list(xlab="year", ylab="房价", lty=c(1:3)))
+pre_holtwinter$mean
+
+###########
+#用naive函数建立模型,此模型通过随机性检验，但是没有通过正态性假设。
+mod_naive <- naive(data)
+checkresiduals(mod_naive)
+shapiro.test(mod_naive$residuals)
+
+############
+##用ETS函数自动建立模型,bu通过正态性检验，bu通过随机性检验。
+fit <- ets(data)
+summary(fit)
+checkresiduals(fit$fitted-fit$x)
+shapiro.test(fit$fitted-fit$x)
+Box.test(fit$fitted-fit$x,type='Ljung-Box')
+forc_ets <- forecast(fit,5)
+ts.plot(forc_ets$x,forc_ets$fitted,forc_ets$mean,gpars=list(xlab="year", ylab="房价", lty=c(1:3)))
